@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   BookOpen,
   Upload,
@@ -12,7 +12,12 @@ import {
   RotateCcw,
   GraduationCap,
   CheckCircle2,
+  Loader2,
+  FileText,
 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { extractFileText } from "@/lib/extract-pdf-text";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -33,20 +38,12 @@ type InputMode = "upload" | "subject";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
-type ScheduleRow = { day: string; topic: string; duration: string };
-
-const MOCK_SCHEDULE: ScheduleRow[] = [
-  { day: "Mon · Week 1", topic: "Introduction & Atomic Structure", duration: "2h" },
-  { day: "Tue · Week 1", topic: "Hybridization and Bonding", duration: "2h" },
-  { day: "Wed · Week 1", topic: "Alkanes — Nomenclature", duration: "2h" },
-  { day: "Thu · Week 1", topic: "Alkenes & Alkynes", duration: "2h" },
-  { day: "Fri · Week 1", topic: "Practice Problems Set 1", duration: "2h" },
-  { day: "Mon · Week 2", topic: "Stereochemistry Basics", duration: "2h" },
-  { day: "Tue · Week 2", topic: "Reaction Mechanisms — SN1/SN2", duration: "2h" },
-  { day: "Wed · Week 2", topic: "Elimination Reactions E1/E2", duration: "2h" },
-  { day: "Thu · Week 2", topic: "Alcohols & Ethers", duration: "2h" },
-  { day: "Fri · Week 2", topic: "Mid-plan Review & Quiz", duration: "2h" },
-];
+type ScheduleRow = {
+  week: number;
+  day: string;
+  topic: string;
+  duration: string;
+};
 
 function Index() {
   const [state, setState] = useState<AppState>("setup");
@@ -56,14 +53,45 @@ function Index() {
   const [weeks, setWeeks] = useState(4);
   const [hours, setHours] = useState(2);
   const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri"]);
+  const [schedule, setSchedule] = useState<ScheduleRow[]>([]);
+  const [generating, setGenerating] = useState(false);
 
   const toggleDay = (d: string) =>
     setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
   const topic = mode === "subject" ? subject || "your subject" : "your uploaded syllabus";
+  const planTitle = mode === "subject" && subject.trim() ? subject.trim() : "Your Study Plan";
 
   const reset = () => {
+    setSchedule([]);
+    setSyllabus("");
     setState("setup");
+  };
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-schedule", {
+        body: {
+          subject: mode === "subject" ? subject : undefined,
+          syllabus: mode === "upload" ? syllabus : undefined,
+          weeks,
+          hoursPerDay: hours,
+          days,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const sessions: ScheduleRow[] = data?.sessions ?? [];
+      if (!sessions.length) throw new Error("AI returned no sessions");
+      setSchedule(sessions);
+      setState("result");
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Failed to generate plan");
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -105,12 +133,15 @@ function Index() {
             weeks={weeks}
             hours={hours}
             days={days}
+            generating={generating}
             onBack={() => setState("setup")}
-            onConfirm={() => setState("result")}
+            onConfirm={generate}
           />
         )}
 
-        {state === "result" && <ResultView onReset={reset} />}
+        {state === "result" && (
+          <ResultView schedule={schedule} planTitle={planTitle} onReset={reset} />
+        )}
       </main>
     </div>
   );
@@ -146,6 +177,28 @@ function SetupView(props: {
     toggleDay,
     onNext,
   } = props;
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+
+  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExtracting(true);
+    setFileName(file.name);
+    try {
+      const text = await extractFileText(file);
+      setSyllabus(text);
+      toast.success(`Extracted ${text.length.toLocaleString()} characters`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not read that file. Paste the text instead.");
+      setFileName(null);
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   const canSubmit =
     days.length > 0 &&
@@ -190,10 +243,26 @@ function SetupView(props: {
             <div>
               <Label icon={<Upload className="h-4 w-4" />}>Syllabus (PDF or text)</Label>
               <label className="mt-2 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 hover:border-indigo-400 hover:bg-indigo-50/50">
-                <Upload className="mb-2 h-6 w-6 text-slate-400" />
-                <span className="font-medium text-slate-700">Click to upload PDF</span>
-                <span className="mt-1 text-xs">or paste your syllabus below</span>
-                <input type="file" accept=".pdf,.txt" className="hidden" />
+                {extracting ? (
+                  <Loader2 className="mb-2 h-6 w-6 animate-spin text-indigo-500" />
+                ) : fileName ? (
+                  <FileText className="mb-2 h-6 w-6 text-indigo-500" />
+                ) : (
+                  <Upload className="mb-2 h-6 w-6 text-slate-400" />
+                )}
+                <span className="font-medium text-slate-700">
+                  {fileName ?? "Click to upload PDF or .txt"}
+                </span>
+                <span className="mt-1 text-xs">
+                  {extracting ? "Extracting text…" : "or paste your syllabus below"}
+                </span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.txt,application/pdf,text/plain"
+                  className="hidden"
+                  onChange={onPickFile}
+                />
               </label>
               <textarea
                 value={syllabus}
@@ -282,10 +351,11 @@ function ReviewView(props: {
   weeks: number;
   hours: number;
   days: string[];
+  generating: boolean;
   onBack: () => void;
   onConfirm: () => void;
 }) {
-  const { topic, weeks, hours, days, onBack, onConfirm } = props;
+  const { topic, weeks, hours, days, generating, onBack, onConfirm } = props;
   return (
     <section className="mx-auto max-w-2xl">
       <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -321,15 +391,25 @@ function ReviewView(props: {
         <div className="mt-8 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             onClick={onBack}
+            disabled={generating}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Back
           </button>
           <button
             onClick={onConfirm}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+            disabled={generating}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
           >
-            <Sparkles className="h-4 w-4" /> Confirm & Generate
+            {generating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" /> Confirm & Generate
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -337,7 +417,41 @@ function ReviewView(props: {
   );
 }
 
-function ResultView({ onReset }: { onReset: () => void }) {
+function ResultView({
+  schedule,
+  planTitle,
+  onReset,
+}: {
+  schedule: ScheduleRow[];
+  planTitle: string;
+  onReset: () => void;
+}) {
+  const downloadPdf = async () => {
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text("DynoSchedule — Study Plan", 14, 18);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(planTitle, 14, 26);
+    doc.text(`Generated ${new Date().toLocaleDateString()}`, 14, 32);
+
+    autoTable(doc, {
+      startY: 40,
+      head: [["Week", "Day", "Topic", "Duration"]],
+      body: schedule.map((r) => [r.week, r.day, r.topic, r.duration]),
+      headStyles: { fillColor: [79, 70, 229] },
+      styles: { fontSize: 10, cellPadding: 3 },
+      columnStyles: {
+        0: { cellWidth: 18 },
+        1: { cellWidth: 22 },
+        3: { cellWidth: 24, halign: "right" },
+      },
+    });
+    doc.save("dynoschedule-plan.pdf");
+  };
+
   return (
     <section>
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
@@ -346,7 +460,7 @@ function ResultView({ onReset }: { onReset: () => void }) {
             Your Study Timetable
           </h2>
           <p className="mt-1 text-slate-600">
-            A clean breakdown of what to study, when, and for how long.
+            {planTitle} — {schedule.length} sessions, ready to follow.
           </p>
         </div>
         <div className="flex gap-2">
@@ -356,7 +470,10 @@ function ResultView({ onReset }: { onReset: () => void }) {
           >
             <RotateCcw className="h-4 w-4" /> Start Over
           </button>
-          <button className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
+          <button
+            onClick={downloadPdf}
+            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
             <Download className="h-4 w-4" /> Download PDF
           </button>
         </div>
@@ -366,14 +483,16 @@ function ResultView({ onReset }: { onReset: () => void }) {
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
+              <th className="px-6 py-3 font-medium">Week</th>
               <th className="px-6 py-3 font-medium">Day</th>
               <th className="px-6 py-3 font-medium">Topic</th>
               <th className="px-6 py-3 font-medium text-right">Duration</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {MOCK_SCHEDULE.map((row, i) => (
+            {schedule.map((row, i) => (
               <tr key={i} className="hover:bg-slate-50">
+                <td className="px-6 py-4 font-medium text-slate-900">W{row.week}</td>
                 <td className="px-6 py-4 font-medium text-slate-900">{row.day}</td>
                 <td className="px-6 py-4 text-slate-700">{row.topic}</td>
                 <td className="px-6 py-4 text-right">
