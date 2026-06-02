@@ -73,14 +73,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "Dynoschedule" },
+      { name: "description", content: "DynoSchedule generates personalized study plans from syllabus uploads or subject inputs." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "Dynoschedule" },
+      { property: "og:description", content: "DynoSchedule generates personalized study plans from syllabus uploads or subject inputs." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Dynoschedule" },
+      { name: "twitter:description", content: "DynoSchedule generates personalized study plans from syllabus uploads or subject inputs." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/e1018b2b-be13-4c97-8b08-9f0eb6c178e1/id-preview-9587483f--705c22b7-213b-4734-a212-0ce29a4b7b1e.lovable.app-1778513688769.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/e1018b2b-be13-4c97-8b08-9f0eb6c178e1/id-preview-9587483f--705c22b7-213b-4734-a212-0ce29a4b7b1e.lovable.app-1778513688769.png" },
     ],
     links: [
       {
